@@ -1,0 +1,390 @@
+#include <stdio.h>
+#include <string.h>
+
+#include "py/nlr.h"
+#include "py/runtime.h"
+#include "py/mphal.h"
+#include "irq.h"
+#include "pin.h"
+#include "genhdr/pins.h"
+#include "bufhelper.h"
+#include "dma.h"
+
+#include "ili9341.h"
+
+#define ILI9341_RESET_PIN           GPIO_PIN_0
+#define ILI9341_RESET_PORT          GPIOB
+#define ILI9341_RESET_RCC_ENABLE()  __GPIOB_CLK_ENABLE()
+
+
+#define ILI9341_BL_PIN              GPIO_PIN_12
+#define ILI9341_BL_PORT             GPIOD
+#define ILI9341_BL_RCC_ENABLE()     __GPIOD_CLK_ENABLE();
+
+SRAM_HandleTypeDef hsram1;
+
+
+
+//ili9341 Reset , Black Light GPIO Initiallzation
+void ili9341_gpio_init(void)
+{
+
+	GPIO_InitTypeDef  GPIO_InitStruct;
+
+	ILI9341_RESET_RCC_ENABLE();
+	ILI9341_BL_RCC_ENABLE();
+
+	HAL_GPIO_WritePin(ILI9341_RESET_PORT, ILI9341_RESET_PIN, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(ILI9341_BL_PORT,ILI9341_BL_PIN,GPIO_PIN_RESET);
+
+
+	GPIO_InitStruct.Pin = ILI9341_RESET_PIN;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+
+	HAL_GPIO_Init(ILI9341_RESET_PORT,&GPIO_InitStruct);
+
+	
+
+	GPIO_InitStruct.Pin = ILI9341_BL_PIN;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+	HAL_GPIO_Init(ILI9341_BL_PORT,&GPIO_InitStruct);
+
+	
+}
+
+
+//static uint32_t FSMC_Initialized = 0;
+//FSMC GPIO Initiallzation Function
+void ili9341_fsmc_gpio_init(void)
+{
+
+	
+	GPIO_InitTypeDef GPIO_InitStruct;
+//	if (FSMC_Initialized) 
+//	{
+//		return;
+//	}
+//	FSMC_Initialized = 1;
+
+    
+	//__AFIO_CLK_ENABLE();
+	__FSMC_CLK_ENABLE();  //FSMC Clock Enable
+	  /** FSMC GPIO Configuration  
+	PE7   ------> FSMC_D4
+	PE8   ------> FSMC_D5
+	PE9   ------> FSMC_D6
+	PE10   ------> FSMC_D7
+	PE11   ------> FSMC_D8
+	PE12   ------> FSMC_D9
+	PE13   ------> FSMC_D10
+	PE14   ------> FSMC_D11
+	PE15   ------> FSMC_D12
+	PD8   ------> FSMC_D13
+	PD9   ------> FSMC_D14
+	PD10   ------> FSMC_D15
+	PD11   ------> FSMC_A16
+	PD14   ------> FSMC_D0
+	PD15   ------> FSMC_D1
+	PD0   ------> FSMC_D2
+	PD1   ------> FSMC_D3
+	PD4   ------> FSMC_NOE
+	PD5   ------> FSMC_NWE
+	PD7   ------> FSMC_NE1
+	*/
+
+  GPIO_InitStruct.Pin = GPIO_PIN_7  | GPIO_PIN_8 | GPIO_PIN_9 | GPIO_PIN_10 |
+                        GPIO_PIN_11 | GPIO_PIN_12| GPIO_PIN_13| GPIO_PIN_14 | 
+                        GPIO_PIN_15;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_HIGH;
+  GPIO_InitStruct.Alternate = GPIO_AF12_FSMC;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+  GPIO_InitStruct.Pin = GPIO_PIN_8  | GPIO_PIN_9  | GPIO_PIN_10 | GPIO_PIN_11 | 
+                        GPIO_PIN_14 | GPIO_PIN_15 | GPIO_PIN_0  | GPIO_PIN_1  |
+                        GPIO_PIN_4  | GPIO_PIN_5  | GPIO_PIN_7;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_HIGH;
+  GPIO_InitStruct.Alternate = GPIO_AF12_FSMC;
+  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct); 
+
+}
+
+void _Error_Handler(char * file, int line)
+{
+  /* USER CODE BEGIN Error_Handler_Debug */
+  /* User can add his own implementation to report the HAL error return state */
+  while(1) 
+  {
+  }
+  /* USER CODE END Error_Handler_Debug */ 
+}
+
+
+//FSMC Initiallzation Function
+void ili9341_fsmc_init(void)
+{
+	//FSMC_NORSRAM_TimingTypeDef Timing;
+
+	FSMC_NORSRAM_TimingTypeDef Timing;
+	
+	/** Perform the SRAM1 memory initialization sequence
+	*/
+	hsram1.Instance = FSMC_NORSRAM_DEVICE;
+	hsram1.Extended = FSMC_NORSRAM_EXTENDED_DEVICE;
+	/* hsram1.Init */
+	hsram1.Init.NSBank = FSMC_NORSRAM_BANK1;
+	hsram1.Init.DataAddressMux = FSMC_DATA_ADDRESS_MUX_DISABLE;
+	hsram1.Init.MemoryType = FSMC_MEMORY_TYPE_SRAM;
+	hsram1.Init.MemoryDataWidth = FSMC_NORSRAM_MEM_BUS_WIDTH_16;
+	hsram1.Init.BurstAccessMode = FSMC_BURST_ACCESS_MODE_DISABLE;
+	hsram1.Init.WaitSignalPolarity = FSMC_WAIT_SIGNAL_POLARITY_LOW;
+	hsram1.Init.WrapMode = FSMC_WRAP_MODE_DISABLE;
+	hsram1.Init.WaitSignalActive = FSMC_WAIT_TIMING_BEFORE_WS;
+	hsram1.Init.WriteOperation = FSMC_WRITE_OPERATION_ENABLE;
+	hsram1.Init.WaitSignal = FSMC_WAIT_SIGNAL_DISABLE;
+	hsram1.Init.ExtendedMode = FSMC_EXTENDED_MODE_DISABLE;
+	hsram1.Init.AsynchronousWait = FSMC_ASYNCHRONOUS_WAIT_DISABLE;
+	hsram1.Init.WriteBurst = FSMC_WRITE_BURST_DISABLE;
+	//hsram1.Init.PageSize = FSMC_PAGE_SIZE_NONE;
+	/* Timing */
+	Timing.AddressSetupTime = 0xf;
+	Timing.AddressHoldTime = 15;
+	Timing.DataSetupTime = 0xff;
+	Timing.BusTurnAroundDuration = 0xf;
+	Timing.CLKDivision = 16;
+	Timing.DataLatency = 17;
+	Timing.AccessMode = FSMC_ACCESS_MODE_A;
+	/* ExtTiming */
+	HAL_SRAM_Init(&hsram1, &Timing, NULL);
+	//if (HAL_SRAM_Init(&hsram1, &Timing, NULL) != HAL_OK)
+	//{
+	//  _Error_Handler(__FILE__, __LINE__);
+	//}
+
+}
+
+//ili9341 Reset 
+void ili9341_reset(void)
+{
+	HAL_GPIO_WritePin(ILI9341_RESET_PORT,ILI9341_RESET_PIN,GPIO_PIN_RESET);
+	HAL_Delay(200);
+	HAL_GPIO_WritePin(ILI9341_RESET_PORT,ILI9341_RESET_PIN,GPIO_PIN_SET);
+	HAL_Delay(200);
+
+}
+
+
+//Open black_light 
+void ili9341_black_light(unsigned char  no)
+{
+
+}
+
+
+uint32_t ili9341_read_id(void)
+{
+    uint8_t buf[4];
+	ILI9341_CMD(0x04);
+	buf[0] = ILI9341_RAM;
+	buf[1] = ILI9341_RAM;
+	buf[2] = ILI9341_RAM;
+	buf[3] = ILI9341_RAM;
+	
+	return (buf[1] << 16) + (buf[2] << 8) + buf[3];
+}
+
+void ili9341_reg_config(void)
+{
+ 
+    //uint32_t id;
+	//id = ili9341_read_id();
+	
+	//printf("id = 0x%x\r\n",id);
+	
+	/*	功率控制B (CFh)  */
+	ILI9341_CMD(0xCF);
+	ILI9341_Parameter(0x00);
+	ILI9341_Parameter(0x81);
+	ILI9341_Parameter(0x30);
+	/*	上电顺序控制 (EDh) */
+	ILI9341_CMD(0xED);
+	ILI9341_Parameter(0x64);
+	ILI9341_Parameter(0x03);
+	ILI9341_Parameter(0x12);
+	ILI9341_Parameter(0x81);
+	/*	驱动时序控制 A (E8h) */
+	ILI9341_CMD(0xE8);
+	ILI9341_Parameter(0x85);
+	ILI9341_Parameter(0x10);
+	ILI9341_Parameter(0x78);
+	/*	功率控制 A (CBh) */
+	ILI9341_CMD(0xCB);
+	ILI9341_Parameter(0x39);
+	ILI9341_Parameter(0x2C);
+	ILI9341_Parameter(0x00);
+	ILI9341_Parameter(0x34);
+	ILI9341_Parameter(0x02);
+	  /* 泵的比率控制 (F7h) */
+	ILI9341_CMD(0xF7);
+	ILI9341_Parameter(0x20);
+	  /* 驱动时序控制 B */
+	ILI9341_CMD(0xEA);
+	ILI9341_Parameter(0x00);
+	ILI9341_Parameter(0x00);
+	  /* 帧速率控制（在正常模式/全彩）(B1h) */
+	ILI9341_CMD(0xB1);
+	ILI9341_Parameter(0x00);
+	ILI9341_Parameter(0x1B);
+	  /*  显示功能控制 (B6h) */
+	ILI9341_CMD(0xB6);
+	ILI9341_Parameter(0x0A);
+	ILI9341_Parameter(0xA2);
+	  /* 功率控制1 (C0h) */
+	ILI9341_CMD(0xC0);
+	ILI9341_Parameter(0x35);
+	  /* 功率控制 2 (C1h) */
+	ILI9341_CMD(0xC1);
+	ILI9341_Parameter(0x11);
+	  /* VCOM 控制 1(C5h) */
+	ILI9341_CMD(0xC5);
+	ILI9341_Parameter(0x45);
+	ILI9341_Parameter(0x45);
+	ILI9341_CMD(0xC7);
+	ILI9341_Parameter(0xA2);
+	  /* 使能 3G (F2h) */
+	ILI9341_CMD(0xF2);
+	ILI9341_Parameter(0x00);
+	  /* 伽玛设置 (26h) */
+	ILI9341_CMD(0x26);
+	ILI9341_Parameter(0x01);
+	  /* 正伽马校正 */
+	ILI9341_CMD(0xE0); //Set Gamma
+	ILI9341_Parameter(0x0F);
+	ILI9341_Parameter(0x26);
+	ILI9341_Parameter(0x24);
+	ILI9341_Parameter(0x0B);
+	ILI9341_Parameter(0x0E);
+	ILI9341_Parameter(0x09);
+	ILI9341_Parameter(0x54);
+	ILI9341_Parameter(0xA8);
+	ILI9341_Parameter(0x46);
+	ILI9341_Parameter(0x0C);
+	ILI9341_Parameter(0x17);
+	ILI9341_Parameter(0x09);
+	ILI9341_Parameter(0x0F);
+	ILI9341_Parameter(0x07);
+	ILI9341_Parameter(0x00);
+	  /* 负伽马校正 (E1h) */
+	ILI9341_CMD(0XE1); //Set Gamma
+	ILI9341_Parameter(0x00);
+	ILI9341_Parameter(0x19);
+	ILI9341_Parameter(0x1B);
+	ILI9341_Parameter(0x04);
+	ILI9341_Parameter(0x10);
+	ILI9341_Parameter(0x07);
+	ILI9341_Parameter(0x2A);
+	ILI9341_Parameter(0x47);
+	ILI9341_Parameter(0x39);
+	ILI9341_Parameter(0x03);
+	ILI9341_Parameter(0x06);
+	ILI9341_Parameter(0x06);
+	ILI9341_Parameter(0x30);
+	ILI9341_Parameter(0x38);
+	ILI9341_Parameter(0x0F);
+	  /* 存储器访问控制设置 */
+	ILI9341_CMD(0x36);	  
+	ILI9341_Parameter(0xC8); /*竖屏左上角到(起点)到右下角(终点)扫描方式*/
+	  /* 列地址控制集 */
+	ILI9341_CMD(0X2A); 
+	ILI9341_Parameter(0x00);
+	ILI9341_Parameter(0x00);
+	ILI9341_Parameter(0x00);
+	ILI9341_Parameter(0xEF);
+	  /* 页地址控制设置 */
+	ILI9341_CMD(0X2B); 
+	ILI9341_Parameter(0x00);
+	ILI9341_Parameter(0x00);
+	ILI9341_Parameter(0x01);
+	ILI9341_Parameter(0x3F);
+	  /*  像素格式设置 (3Ah)	*/
+	ILI9341_CMD(0x3a); 
+	ILI9341_Parameter(0x55);
+	  /* 退出睡眠状态 (11h)  */
+	ILI9341_CMD(0x11);	  
+	HAL_Delay(20);
+	  /* 显示ON (29h) */
+	ILI9341_CMD(0x29);
+
+}
+
+//ili9341 Initiallzation 
+void ili9341_init(void)
+{
+    printf("ili9341_init start ...\r\n");
+    ili9341_gpio_init();
+    ili9341_fsmc_gpio_init();
+    ili9341_black_light(1);
+    ili9341_reset();
+    ili9341_reg_config();
+    printf("ili9341_init end\r\n");
+
+
+}
+
+void ili9341_set_display_window(uint16_t x,uint16_t y, uint16_t width,uint16_t height)
+{
+    ILI9341_CMD(0X2A);                    //设置X坐标
+    ILI9341_Parameter(x>>8);                //先高八位，后低八位
+    ILI9341_Parameter(x&0xff);            //设置起始点和终止点
+    ILI9341_Parameter((x+width-1) >> 8);
+    ILI9341_Parameter((x+width-1) & 0xff);
+
+    ILI9341_CMD(0X2B);            //设置Y坐标
+    ILI9341_Parameter(y>>8);
+    ILI9341_Parameter(y&0xff);
+    ILI9341_Parameter((y+height-1) >> 8);
+    ILI9341_Parameter((y+height-1) & 0xff);
+}
+
+void ili9341_set_cursor(uint16_t x,uint16_t y)
+{
+    ili9341_set_display_window (x,y,1,1);
+}
+
+void ili9341_set_point(uint16_t x,uint16_t y,uint16_t color)
+{
+    ili9341_set_cursor(x,y);
+    ILI9341_CMD(0x2c);/* 写数据 */
+    ILI9341_Parameter(color);
+
+}
+
+void ili9341_clear(uint16_t x, uint16_t y, uint16_t width, uint16_t height, uint16_t color)
+{
+    uint32_t i = 0;
+    ili9341_set_display_window(x,y,width,height);//设置显示区域
+    /* 以下逐点写入颜色值 */
+    ILI9341_CMD(0x2c);
+    for( i=0; i < width*height; i++ )
+    {
+        ILI9341_Parameter( color );
+    }
+
+}
+void ili9341_test(void)
+{
+    ili9341_init();
+    ili9341_clear(0,0,240,320,0xF800);
+
+}
+
+
+
+
